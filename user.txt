@@ -1,1 +1,4 @@
-
+# Format: email|expiration_date
+# Tanggal expired dalam format YYYY-MM-DD
+myudi422@gmail.com|2025-12-31
+bob@example.com|2024-06-30
