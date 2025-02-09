@@ -287,53 +287,6 @@ def get_video_info(file_path: str) -> dict:
 # Helper: Menjalankan ffmpeg untuk Streaming
 # -------------------------------
 def start_ffmpeg_stream(file_path: str, stream_key: str, stream_id: str, platform: str, custom_rtmp_url: str = None):
-    # Ambil informasi video (misalnya resolusi)
-    info = get_video_info(file_path)
-    width = info.get("width", 1280)
-    
-    # Tentukan apakah perlu scaling
-    scale_filter = None
-    if width > 1920:
-        scale_filter = "scale=1920:-2"
-    
-    # Tentukan bitrate video berdasarkan resolusi
-    if width >= 1920:
-        video_bitrate = "2500k"
-    elif width >= 1280:
-        video_bitrate = "1500k"
-    else:
-        video_bitrate = "1000k"
-    
-    # Siapkan direktori untuk file pre-encode
-    preencoded_dir = "preencoded"
-    if not os.path.exists(preencoded_dir):
-        os.makedirs(preencoded_dir)
-    
-    # Gunakan nama dasar dari file untuk file preencoded
-    base_name = os.path.basename(file_path)
-    preencoded_path = os.path.join(preencoded_dir, base_name)
-    
-    # Jika file pre-encoded belum ada, lakukan encoding sekali saja
-    if not os.path.exists(preencoded_path):
-        preencode_command = [
-            "ffmpeg",
-            "-i", file_path,
-            "-vcodec", "libx264",
-            "-preset", "veryfast",
-            "-b:v", video_bitrate,
-            "-maxrate", video_bitrate,
-            "-bufsize", "2000k",
-            "-g", "48",
-            "-keyint_min", "48",
-            "-c:a", "aac",
-            "-b:a", "128k"
-        ]
-        if scale_filter:
-            preencode_command.extend(["-vf", scale_filter])
-        preencode_command.append(preencoded_path)
-        print("Pre-encoding file dengan command:", " ".join(preencode_command))
-        subprocess.run(preencode_command, check=True)
-    
     # Tentukan target RTMP URL berdasarkan platform
     if platform == "youtube":
         target_url = f"rtmp://a.rtmp.youtube.com/live2/{stream_key}"
@@ -348,13 +301,13 @@ def start_ffmpeg_stream(file_path: str, stream_key: str, stream_id: str, platfor
     else:
         raise ValueError("Invalid platform specified.")
     
-    # Jalankan ffmpeg untuk streaming menggunakan file pre-encoded dengan stream copy (tanpa encoding ulang)
+    # Perintah ffmpeg dengan stream copy (remux only)
     command = [
         "ffmpeg",
         "-re",
-        "-stream_loop", "-1",   # Looping terus menerus
-        "-i", preencoded_path,
-        "-c", "copy",           # Tidak melakukan encoding ulang
+        "-stream_loop", "-1",
+        "-i", file_path,
+        "-c", "copy",   # Menggunakan stream copy tanpa encoding ulang
         "-f", "flv",
         target_url
     ]
