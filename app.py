@@ -34,6 +34,24 @@ app.add_middleware(
 # --- Global Event Loop & Helper Update ---
 event_loop = None
 
+def kill_orphan_ffmpeg():
+    # Kumpulkan semua PID ffmpeg yang sedang dikelola
+    managed_pids = {stream["process"].pid for stream in streams.values()}
+    # Iterasi seluruh proses sistem yang bernama 'ffmpeg'
+    for proc in psutil.process_iter(attrs=["pid", "name", "cmdline"]):
+        try:
+            if proc.info["name"] == "ffmpeg" and proc.pid not in managed_pids:
+                print(f"Found orphan ffmpeg process {proc.pid}, terminating...")
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                    print(f"Orphan process {proc.pid} terminated.")
+                except psutil.TimeoutExpired:
+                    proc.kill()
+                    print(f"Orphan process {proc.pid} killed.")
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+
 def schedule_update():
     if event_loop:
         asyncio.run_coroutine_threadsafe(broadcast_update(), event_loop)
@@ -109,6 +127,23 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
+
+@app.on_event("shutdown")
+def shutdown_event():
+    # Hentikan semua proses ffmpeg yang tercatat di streams
+    for stream_id, stream in list(streams.items()):
+        process = stream["process"]
+        try:
+            if process.poll() is None:  # Proses masih berjalan
+                process.terminate()
+                process.wait(timeout=5)
+                print(f"Terminated ffmpeg process for stream {stream_id}")
+        except Exception as e:
+            print(f"Error terminating ffmpeg process for stream {stream_id}: {e}")
+    scheduler.shutdown()
+    # Panggil fungsi untuk menghentikan proses orphan
+    kill_orphan_ffmpeg()
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
@@ -178,10 +213,6 @@ def startup_event():
     scheduler.start()
     # Ubah interval pengecekan menjadi 2 detik agar lebih responsif
     scheduler.add_job(check_streams_status, 'interval', seconds=2)
-
-@app.on_event("shutdown")
-def shutdown_event():
-    scheduler.shutdown()
 
 # -------------------------------
 # Endpoint Download & Daftar File
@@ -313,7 +344,7 @@ def start_ffmpeg_stream(file_path: str, stream_key: str, stream_id: str, platfor
     
     print("Running command:", " ".join(command))
     
-    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
     threading.Thread(target=monitor_ffmpeg, args=(process, stream_id), daemon=True).start()
     return process
 
