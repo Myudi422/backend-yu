@@ -359,17 +359,26 @@ def list_streams():
 @app.patch("/api/streams/{stream_id}/toggle", response_model=StreamResponse)
 def toggle_stream(stream_id: str):
     if stream_id not in streams:
-        raise HTTPException(status_code=404, detail="Stream not found.")
+        raise HTTPException(status_code=404, detail="Stream tidak ditemukan.")
     stream = streams[stream_id]
     process = stream["process"]
-    if stream["active"]:
-        os.kill(process.pid, signal.SIGSTOP)
+    try:
+        if stream["active"]:
+            os.kill(process.pid, signal.SIGSTOP)
+            stream["active"] = False
+        else:
+            os.kill(process.pid, signal.SIGCONT)
+            stream["active"] = True
+    except ProcessLookupError:
+        # Jika proses sudah tidak ada, set status non aktif
         stream["active"] = False
-    else:
-        os.kill(process.pid, signal.SIGCONT)
-        stream["active"] = True
     schedule_update()
-    return StreamResponse(id=stream["id"], file=stream["file"], youtube_key=stream["youtube_key"], active=stream["active"])
+    return StreamResponse(
+        id=stream["id"],
+        file=stream["file"],
+        youtube_key=stream["youtube_key"],
+        active=stream["active"]
+    )
 
 @app.delete("/api/streams/{stream_id}", response_model=dict)
 def delete_stream(stream_id: str):
@@ -453,13 +462,18 @@ def list_scheduled_streams():
 
 @app.delete("/api/scheduled/{schedule_id}", response_model=dict)
 def delete_scheduled_stream(schedule_id: str):
+    # Jika schedule_id tidak ditemukan, anggap sudah berjalan atau sudah dihapus.
     if schedule_id not in scheduled_streams:
-        raise HTTPException(status_code=404, detail="Scheduled stream not found.")
-    # Hapus _job_ dari scheduler
-    scheduler.remove_job(schedule_id)
-    scheduled_streams.pop(schedule_id)
+        return {"detail": "Scheduled stream sudah berjalan atau tidak ditemukan."}
+    try:
+        scheduler.remove_job(schedule_id)
+    except Exception as e:
+        # Jika terjadi error pada remove_job, kita bisa mengabaikannya
+        pass
+    scheduled_streams.pop(schedule_id, None)
     schedule_update()
-    return {"detail": "Scheduled stream removed."}
+    return {"detail": "Scheduled stream dihapus."}
+
 
 @app.post("/api/scheduled/{schedule_id}/start", response_model=StreamResponse)
 def start_scheduled_stream(schedule_id: str):
