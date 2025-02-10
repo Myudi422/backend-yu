@@ -66,11 +66,14 @@ class DownloadRequest(BaseModel):
 class DownloadResponse(BaseModel):
     file_name: str
 
+# Tambahkan properti "source" di sini (nilai default "file")
 class StreamRequest(BaseModel):
-    file: str
+    source: str = "file"  # "file" atau "obs"
+    file: Optional[str] = None  # diperlukan jika source=="file"
     youtube_key: str
     platform: str
     custom_rtmp_url: Optional[str] = None
+
 
 class StreamResponse(BaseModel):
     id: str
@@ -283,11 +286,11 @@ def get_video_info(file_path: str) -> dict:
         return {}
 
 
+
 # -------------------------------
 # Helper: Menjalankan ffmpeg untuk Streaming
 # -------------------------------
-def start_ffmpeg_stream(file_path: str, stream_key: str, stream_id: str, platform: str, custom_rtmp_url: str = None):
-    # Tentukan target RTMP URL berdasarkan platform
+def start_ffmpeg_stream(input_source: str, stream_key: str, stream_id: str, platform: str, source_type: str = "file", custom_rtmp_url: str = None):
     if platform == "youtube":
         target_url = f"rtmp://a.rtmp.youtube.com/live2/{stream_key}"
     elif platform == "facebook":
@@ -301,19 +304,28 @@ def start_ffmpeg_stream(file_path: str, stream_key: str, stream_id: str, platfor
     else:
         raise ValueError("Invalid platform specified.")
     
-    # Perintah ffmpeg dengan stream copy (remux only)
-    command = [
-        "ffmpeg",
-        "-re",
-        "-stream_loop", "-1",
-        "-i", file_path,
-        "-c", "copy",   # Menggunakan stream copy tanpa encoding ulang
-        "-f", "flv",
-        target_url
-    ]
+    if source_type == "file":
+        command = [
+            "ffmpeg",
+            "-re",
+            "-stream_loop", "-1",
+            "-i", input_source,
+            "-c", "copy",
+            "-f", "flv",
+            target_url
+        ]
+    elif source_type == "obs":
+        command = [
+            "ffmpeg",
+            "-i", input_source,
+            "-c", "copy",
+            "-f", "flv",
+            target_url
+        ]
+    else:
+        raise ValueError("Invalid source type specified.")
     
     print("Running command:", " ".join(command))
-    
     process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
     threading.Thread(target=monitor_ffmpeg, args=(process, stream_id), daemon=True).start()
     return process
@@ -326,25 +338,50 @@ def start_ffmpeg_stream(file_path: str, stream_key: str, stream_id: str, platfor
 # -------------------------------
 @app.post("/api/streams", response_model=StreamResponse)
 def create_stream(req: StreamRequest):
-    file_path = os.path.join(DOWNLOAD_DIR, req.file)
-    if not os.path.exists(file_path):
-        raise HTTPException(status_code=404, detail="File not found.")
+    # Tentukan input source berdasarkan pilihan user
+    if req.source == "file":
+        if not req.file:
+            raise HTTPException(status_code=400, detail="Field 'file' harus diisi jika source adalah file.")
+        file_path = os.path.join(DOWNLOAD_DIR, req.file)
+        if not os.path.exists(file_path):
+            raise HTTPException(status_code=404, detail="File not found.")
+        input_source = file_path
+    elif req.source == "obs":
+        # URL OBS: pastikan OBS dikonfigurasi untuk streaming ke alamat ini
+        OBS_STREAM_URL = "rtmp://127.0.0.1/live/obs"
+        input_source = OBS_STREAM_URL
+    else:
+        raise HTTPException(status_code=400, detail="Invalid source type.")
+
+    # Cek apakah stream sudah berjalan (sesuai sumber)
     for stream in streams.values():
-        if stream["file"] == req.file and stream["youtube_key"] == req.youtube_key:
-            raise HTTPException(status_code=400, detail="This stream is already running.")
+        if stream.get("source", "file") == req.source:
+            if req.source == "file":
+                if stream["file"] == req.file and stream["youtube_key"] == req.youtube_key:
+                    raise HTTPException(status_code=400, detail="This stream is already running.")
+            elif req.source == "obs":
+                if stream["youtube_key"] == req.youtube_key:
+                    raise HTTPException(status_code=400, detail="This OBS stream is already running.")
+    
     stream_id = str(uuid.uuid4())
-    process = start_ffmpeg_stream(file_path, req.youtube_key, stream_id, req.platform, req.custom_rtmp_url)
+    process = start_ffmpeg_stream(input_source, req.youtube_key, stream_id, req.platform, req.source, req.custom_rtmp_url)
     streams[stream_id] = {
         "id": stream_id,
-        "file": req.file,
+        "file": req.file if req.source == "file" else "OBS Stream",
         "youtube_key": req.youtube_key,
         "platform": req.platform,
         "custom_rtmp_url": req.custom_rtmp_url,
+        "source": req.source,
         "process": process,
         "active": True
     }
     schedule_update()
-    return StreamResponse(id=stream_id, file=req.file, youtube_key=req.youtube_key, active=True)
+    return StreamResponse(
+        id=stream_id,
+        file=req.file if req.source == "file" else "OBS Stream",
+        youtube_key=req.youtube_key,
+        active=True
+    )
 
 @app.get("/api/streams", response_model=list[StreamResponse])
 def list_streams():
