@@ -348,7 +348,7 @@ def create_stream(req: StreamRequest):
         input_source = file_path
     elif req.source == "obs":
         # URL OBS: pastikan OBS dikonfigurasi untuk streaming ke alamat ini
-        OBS_STREAM_URL = "rtmp://127.0.0.1/live/obs"
+        OBS_STREAM_URL = "rtmp://127.0.0.1/live/"
         input_source = OBS_STREAM_URL
     else:
         raise HTTPException(status_code=400, detail="Invalid source type.")
