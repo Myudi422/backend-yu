@@ -500,7 +500,8 @@ def job_start_scheduled_stream(schedule_id: str, file: str, youtube_key: str, pl
         "platform": platform,
         "custom_rtmp_url": custom_rtmp_url,
         "process": process,
-        "active": True
+        "active": True,
+        "schedule_end_time": schedule_end_time  # Simpan end date di sini
     }
     try:
         dt_wib_end = datetime.fromisoformat(schedule_end_time)
@@ -538,10 +539,12 @@ def list_scheduled_streams():
             id=s["id"],
             file=s["file"],
             youtube_key=s["youtube_key"],
-            schedule_time=s["schedule_time"]
+            schedule_time=s["schedule_time"],
+            schedule_end_time=s["schedule_end_time"]  # Sertakan end time
         )
         for s in scheduled_streams.values()
     ]
+
 
 @app.delete("/api/scheduled/{schedule_id}", response_model=dict)
 def delete_scheduled_stream(schedule_id: str):
