@@ -491,7 +491,8 @@ def job_start_scheduled_stream(schedule_id: str, file: str, youtube_key: str, pl
     if not os.path.exists(file_path):
         return
     stream_id = str(uuid.uuid4())
-    process = start_ffmpeg_stream(file_path, youtube_key, stream_id, platform, custom_rtmp_url)
+    # Perbaikan: tambahkan source_type="file" secara eksplisit
+    process = start_ffmpeg_stream(file_path, youtube_key, stream_id, platform, "file", custom_rtmp_url)
     streams[stream_id] = {
         "id": stream_id,
         "file": file,
@@ -571,7 +572,7 @@ def start_scheduled_stream(schedule_id: str):
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="File not found.")
     stream_id = str(uuid.uuid4())
-    process = start_ffmpeg_stream(file_path, youtube_key, stream_id, platform, custom_rtmp_url)
+    process = start_ffmpeg_stream(file_path, youtube_key, stream_id, platform, "file", custom_rtmp_url)
     streams[stream_id] = {
         "id": stream_id,
         "file": file,
