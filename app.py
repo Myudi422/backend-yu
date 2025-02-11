@@ -88,12 +88,14 @@ class ScheduledStreamRequest(BaseModel):
     platform: str
     custom_rtmp_url: Optional[str] = None
     schedule_time: str
+    schedule_end_time: str  # Waktu berakhir streaming
 
 class ScheduledStreamResponse(BaseModel):
     id: str
     file: str
     youtube_key: str
     schedule_time: str
+    schedule_end_time: str  # Waktu berakhir streaming
 
 # -------------------------------
 # Penyimpanan Data In-Memory
@@ -443,16 +445,23 @@ def schedule_stream(req: ScheduledStreamRequest):
             raise HTTPException(status_code=400, detail="This stream is already scheduled.")
     schedule_id = str(uuid.uuid4())
     try:
+        # Parse waktu mulai
         dt_wib = datetime.fromisoformat(req.schedule_time)
         dt_wib = dt_wib.replace(tzinfo=ZoneInfo("Asia/Jakarta"))
         dt_utc = dt_wib.astimezone(timezone.utc)
+        # Parse waktu berakhir
+        dt_wib_end = datetime.fromisoformat(req.schedule_end_time)
+        dt_wib_end = dt_wib_end.replace(tzinfo=ZoneInfo("Asia/Jakarta"))
+        dt_utc_end = dt_wib_end.astimezone(timezone.utc)
+        if dt_utc_end <= dt_utc:
+            raise HTTPException(status_code=400, detail="End time must be after start time.")
     except Exception as e:
         raise HTTPException(status_code=400, detail="Invalid datetime format. Use ISO format.")
     trigger = DateTrigger(run_date=dt_utc)
     scheduler.add_job(
         func=job_start_scheduled_stream,
         trigger=trigger,
-        args=[schedule_id, req.file, req.youtube_key, req.platform, req.custom_rtmp_url],
+        args=[schedule_id, req.file, req.youtube_key, req.platform, req.customRtmpUrl, req.schedule_end_time],
         id=schedule_id
     )
     scheduled_streams[schedule_id] = {
@@ -462,12 +471,19 @@ def schedule_stream(req: ScheduledStreamRequest):
         "platform": req.platform,
         "custom_rtmp_url": req.custom_rtmp_url,
         "schedule_time": req.schedule_time,
+        "schedule_end_time": req.schedule_end_time,
         "job": scheduler.get_job(schedule_id)
     }
     schedule_update()
-    return ScheduledStreamResponse(id=schedule_id, file=req.file, youtube_key=req.youtube_key, schedule_time=req.schedule_time)
+    return ScheduledStreamResponse(
+        id=schedule_id,
+        file=req.file,
+        youtube_key=req.youtube_key,
+        schedule_time=req.schedule_time,
+        schedule_end_time=req.schedule_end_time
+    )
 
-def job_start_scheduled_stream(schedule_id: str, file: str, youtube_key: str, platform: str, custom_rtmp_url: str):
+def job_start_scheduled_stream(schedule_id: str, file: str, youtube_key: str, platform: str, custom_rtmp_url: str, schedule_end_time: str):
     if schedule_id not in scheduled_streams:
         return
     scheduled_streams.pop(schedule_id, None)
@@ -485,7 +501,34 @@ def job_start_scheduled_stream(schedule_id: str, file: str, youtube_key: str, pl
         "process": process,
         "active": True
     }
+    try:
+        dt_wib_end = datetime.fromisoformat(schedule_end_time)
+        dt_wib_end = dt_wib_end.replace(tzinfo=ZoneInfo("Asia/Jakarta"))
+        dt_utc_end = dt_wib_end.astimezone(timezone.utc)
+    except Exception as e:
+        print("Invalid schedule_end_time format:", e)
+        dt_utc_end = None
+    if dt_utc_end:
+        stop_job_id = f"stop_{stream_id}"
+        scheduler.add_job(
+            func=job_stop_stream,
+            trigger=DateTrigger(run_date=dt_utc_end),
+            args=[stream_id],
+            id=stop_job_id
+        )
     schedule_update()
+
+def job_stop_stream(stream_id: str):
+    if stream_id in streams:
+        process = streams[stream_id]["process"]
+        try:
+            process.terminate()
+            process.wait(timeout=5)
+        except Exception as e:
+            print(f"Error stopping stream {stream_id}: {e}")
+        streams.pop(stream_id, None)
+        schedule_update()
+
 
 @app.get("/api/scheduled", response_model=list[ScheduledStreamResponse])
 def list_scheduled_streams():
