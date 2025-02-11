@@ -461,7 +461,8 @@ def schedule_stream(req: ScheduledStreamRequest):
     scheduler.add_job(
         func=job_start_scheduled_stream,
         trigger=trigger,
-        args=[schedule_id, req.file, req.youtube_key, req.platform, req.customRtmpUrl, req.schedule_end_time],
+        args=[schedule_id, req.file, req.youtube_key, req.platform, req.custom_rtmp_url, req.schedule_end_time],
+
         id=schedule_id
     )
     scheduled_streams[schedule_id] = {
