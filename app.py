@@ -80,6 +80,7 @@ class StreamResponse(BaseModel):
     file: str
     youtube_key: str
     active: bool
+    schedule_end_time: Optional[str] = None  # Tambahkan properti ini
 
 
 class ScheduledStreamRequest(BaseModel):
@@ -190,7 +191,8 @@ async def broadcast_update():
                 "id": s["id"],
                 "file": s["file"],
                 "youtube_key": s["youtube_key"],
-                "active": s["active"]
+                "active": s["active"],
+                "schedule_end_time": s.get("schedule_end_time")  # Sertakan end time di sini
             }
             for s in streams.values()
         ],
@@ -199,12 +201,14 @@ async def broadcast_update():
                 "id": s["id"],
                 "file": s["file"],
                 "youtube_key": s["youtube_key"],
-                "schedule_time": s["schedule_time"]
+                "schedule_time": s["schedule_time"],
+                "schedule_end_time": s["schedule_end_time"]  # pastikan scheduled stream juga kirim end time
             }
             for s in scheduled_streams.values()
         ]
     }
     await manager.broadcast(json.dumps(data))
+
 
 # -------------------------------
 # APScheduler Setup
@@ -392,7 +396,8 @@ def list_streams():
             id=stream["id"],
             file=stream["file"],
             youtube_key=stream["youtube_key"],
-            active=stream["active"]
+            active=stream["active"],
+            schedule_end_time=stream.get("schedule_end_time")  # Sertakan end time jika ada
         )
         for stream in streams.values()
     ]
